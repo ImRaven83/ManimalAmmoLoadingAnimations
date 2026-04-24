@@ -1,0 +1,39 @@
+{
+  // LoadAmmoAnim hidden animation IFAK
+  // This item is used by LoadAmmoAnimClient to drive the mag-loading animation
+  // via Player.Proceed(MedsItemClass) — it needs a real tracked item with a valid
+  // owner/address for the prefab pooling system to work correctly.
+  "69d69c70ed183ba9c882f7f7": {
+    "itemTplToClone": "590c678286f77426c9660122",
+    "parentId": "5448f39d4bdc2d0a728b4568",
+    "handbookParentId": "5b47574386f77428ca22b338",
+    "overrideProperties": {
+      "Weight": 0,
+      "ExaminedByDefault": true,
+      "QuestItem": true,
+      "CanSellOnRagfair": false,
+      "Prefab": {
+        "path": "assets/content/weapons/usable_items/item_ifak/item_ifak_loot.bundle",
+        "rcid": ""
+      },
+      "UsePrefab": {
+        "path": "manimal/stanags_container.bundle",
+        "rcid": ""
+      },
+      "CanRequireOnRagfair": false,
+      "Unlootable": true,
+      "InsuranceDisabled": true
+    },
+    "locales": {
+      "en": {
+        "name": "[LoadAmmoAnim] Animation IFAK",
+        "shortName": "AnimIFAK",
+        "description": "An internal placeholder item used by LoadAmmoAnim for magazine loading animations. Do not remove."
+      }
+    },
+    "fleaPriceRoubles": 0,
+    "handbookPriceRoubles": 0,
+    "addtoBots": false,
+    "addtoTraders": false
+  }
+}

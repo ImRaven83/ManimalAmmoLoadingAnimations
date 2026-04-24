@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <RootNamespace>LoadAmmoAnimMod</RootNamespace>
+    <AssemblyName>LoadAmmoAnimServer</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Manimal</Authors>
+    <Company>Manimal</Company>
+    <Product>LoadAmmoAnim</Product>
+    <Description>Server-side mod that registers the hidden animation IFAK item for LoadAmmoAnim</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.6" />
+    <PackageReference Include="SPTarkov.Common" Version="4.0.13" />
+    <PackageReference Include="SPTarkov.DI" Version="4.0.13" />
+    <PackageReference Include="SPTarkov.Server.Core" Version="4.0.13" />
+    <PackageReference Include="WTT-ServerCommonLib" Version="2.0.15" />
+  </ItemGroup>
+
+  <!-- Copy DLL and all static mod files to the SPT dev install -->
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <PropertyGroup>
+      <DeployDir>D:\SPTDev\SPT\user\mods\LoadAmmoAnimServer</DeployDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(DeployDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" />
+    <!-- Copy static mod files (bundles.json, db/) preserving directory structure -->
+    <ItemGroup>
+      <StaticModFiles Include="$(ProjectDir)ServerModFiles\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(StaticModFiles)"
+          DestinationFiles="@(StaticModFiles->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <Target Name="PackageModForDistribution" AfterTargets="Build">
+    <PropertyGroup>
+      <ModName>$(AssemblyName)</ModName>
+      <ZipFileName>$(ModName).zip</ZipFileName>
+      <TempPackageDir>$(ProjectDir)obj\Package</TempPackageDir>
+      <ModPackageDir>$(TempPackageDir)\SPT\user\mods\LoadAmmoAnimServer</ModPackageDir>
+    </PropertyGroup>
+    <Message Text="--- Starting Mod packaging for distribution ---" Importance="high" />
+    <RemoveDir Directories="$(TempPackageDir)" />
+    <MakeDir Directories="$(ModPackageDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModPackageDir)" />
+    <ItemGroup>
+      <StaticModFilesForZip Include="$(ProjectDir)ServerModFiles\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(StaticModFilesForZip)"
+          DestinationFiles="@(StaticModFilesForZip->'$(ModPackageDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory SourceDirectory="$(TempPackageDir)" DestinationFile="$(ProjectDir)$(ZipFileName)" Overwrite="true" />
+    <RemoveDir Directories="$(TempPackageDir)" />
+    <Message Text="--- Mod successfully packaged at: $(ProjectDir)$(ZipFileName) ---" Importance="high" />
+  </Target>
+</Project>
