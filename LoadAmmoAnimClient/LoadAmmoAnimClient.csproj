@@ -6,10 +6,10 @@
     <AssemblyName>LoadAmmoAnimClient</AssemblyName>
     <Nullable>disable</Nullable>
     <Authors>Manimal</Authors>
-    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <AssemblyVersion>$(ModVersion).0</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
     <Configurations>Debug;Release</Configurations>
-    <Version>$(AssemblyVersion)</Version>
+    <Version>$(ModVersion)</Version>
     <LangVersion>latest</LangVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
@@ -56,6 +56,33 @@
       <HintPath>D:\SPTDev\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
     </Reference>
   </ItemGroup>
+
+  <!--
+    Generate BuildInfo.g.cs from Directory.Build.props so [BepInPlugin] can use
+    BuildInfo.Version / BuildInfo.ModGuid as compile-time constants. update version
+    in Directory.Build.props and the attribute follows automatically.
+  -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BuildInfoLines Remove="@(_BuildInfoLines)" />
+      <_BuildInfoLines Include="// auto-generated from Directory.Build.props — do not edit" />
+      <_BuildInfoLines Include="namespace $(RootNamespace)" />
+      <_BuildInfoLines Include="{" />
+      <_BuildInfoLines Include="    internal static class BuildInfo" />
+      <_BuildInfoLines Include="    {" />
+      <_BuildInfoLines Include="        public const string Version = %22$(ModVersion)%22%3B" />
+      <_BuildInfoLines Include="        public const string ModGuid = %22$(ModGuid)%22%3B" />
+      <_BuildInfoLines Include="    }" />
+      <_BuildInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="@(_BuildInfoLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <MakeDir Directories="D:\SPTDev\BepInEx\plugins\LoadAmmoAnim" />

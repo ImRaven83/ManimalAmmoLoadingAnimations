@@ -6,7 +6,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <RootNamespace>LoadAmmoAnimMod</RootNamespace>
     <AssemblyName>LoadAmmoAnimServer</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>$(ModVersion)</Version>
     <Authors>Manimal</Authors>
     <Company>Manimal</Company>
     <Product>LoadAmmoAnim</Product>
@@ -34,6 +34,33 @@
                       ReferenceOutputAssembly="false"
                       Private="false" />
   </ItemGroup>
+
+  <!--
+    Generate BuildInfo.g.cs from Directory.Build.props so ModMetadata can use
+    BuildInfo.Version / BuildInfo.ModGuid as compile-time constants. update version
+    in Directory.Build.props and the metadata follows automatically.
+  -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</BuildInfoFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BuildInfoLines Remove="@(_BuildInfoLines)" />
+      <_BuildInfoLines Include="// auto-generated from Directory.Build.props — do not edit" />
+      <_BuildInfoLines Include="namespace $(RootNamespace)" />
+      <_BuildInfoLines Include="{" />
+      <_BuildInfoLines Include="    internal static class BuildInfo" />
+      <_BuildInfoLines Include="    {" />
+      <_BuildInfoLines Include="        public const string Version = %22$(ModVersion)%22%3B" />
+      <_BuildInfoLines Include="        public const string ModGuid = %22$(ModGuid)%22%3B" />
+      <_BuildInfoLines Include="    }" />
+      <_BuildInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BuildInfoFile)" Lines="@(_BuildInfoLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
 
   <!-- Copy DLL and all static mod files to the SPT dev install -->
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    Single source of truth for the mod version + GUID. update ModVersion here
+    and every place that uses it (BepInPlugin attribute, server ModMetadata,
+    csproj Version, release zip filename) refreshes on next build.
+  -->
+  <PropertyGroup>
+    <ModVersion>1.1.1</ModVersion>
+    <ModGuid>com.manimal.loadammoanim</ModGuid>
+  </PropertyGroup>
+</Project>

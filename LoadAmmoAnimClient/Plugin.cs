@@ -5,7 +5,7 @@ using Manimal.LoadAmmoAnim.Patches;
 
 namespace Manimal.LoadAmmoAnim
 {
-    [BepInPlugin("Manimal.LoadAmmoAnim", "LoadAmmoAnim", "1.0.0")]
+    [BepInPlugin(BuildInfo.ModGuid, "Manimal-LoadAmmoAnim", BuildInfo.Version)]
     public class Plugin : BaseUnityPlugin
     {
         public static ManualLogSource LogSource;
