@@ -267,8 +267,64 @@ namespace Manimal.LoadAmmoAnim.Patches
                 animator.SetAnimationSpeed(animSpeed);
             }
 
+            // bundle GameObject is asset-pooled, so its animator can wake up parked at
+            // the end of last sessions put-away state. force-rewind to a known entry
+            // state so the use-loop always runs on session start.
+            if (isFirstCall)
+                ResetBundleAnimatorState(controller);
+
             LoadAmmoAnimState.LoopCoroutine =
                 LoadAmmoAnimState.ActivePlayer.StartCoroutine(AnimLoop(controller));
+        }
+
+        // candidate entry-state names, tried in order. first one that exists wins.
+        // "OUT TO USE S" is the inverse of the put-away "USE TO OUT S" so its the
+        // most likely match; the rest are fallbacks for differently-wired animators.
+        private static readonly string[] EntryStateCandidates =
+        {
+            "OUT TO USE S",
+            "USE LOOP",
+            "USE LOOP S",
+            "USE_IN",
+            "USE",
+            "Spawn",
+        };
+
+        // log the parked state for diagnostics, then force-play the first candidate
+        // entry state that exists. FastAnimator's Play silently no-ops on missing states
+        // so we cant detect a hit — the diagnostic on the next session tells us.
+        private static void ResetBundleAnimatorState(Player.MedsController.ObservedMedsControllerClass controller)
+        {
+            var animator = controller?.MedsController_0?.FirearmsAnimator?.Animator;
+            if (animator == null) return;
+
+            try
+            {
+                for (int layer = 0; layer < 2; layer++)
+                {
+                    try
+                    {
+                        var info = animator.GetCurrentAnimatorStateInfo(layer);
+                        Plugin.LogSource?.LogInfo(
+                            $"[LoadAmmoAnim] session-start animator state on layer {layer}: nt={info.normalizedTime:F2} fullPathHash={info.fullPathHash}");
+                    }
+                    catch { }
+                }
+
+                foreach (var stateName in EntryStateCandidates)
+                {
+                    for (int layer = 0; layer < 2; layer++)
+                    {
+                        try { animator.Play(stateName, layer, 0f); break; }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogSource?.LogWarning(
+                    $"[LoadAmmoAnim] ResetBundleAnimatorState threw: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         // finds the target renderer and enables it. all other meshes are already disabled
@@ -296,9 +352,9 @@ namespace Manimal.LoadAmmoAnim.Patches
             Plugin.LogSource.LogWarning($"[LoadAmmoAnim] couldn't find mesh '{targetMesh}' under ControllerGameObject.");
         }
 
-        // disables the active renderer so the bundle is clean for next time (all meshes
-        // back to disabled, same as they ship in the bundle), then calls method_9 to
-        // trigger the put-away transition and re-equip the weapon via OnOutUseEvent.
+        // immediate teardown — disable mesh + DestroyController. used for the
+        // bypasses method_9's hide pipeline (which hangs without a transition out of the
+        // put-away state) by yanking the bundle gameobject straight back to its pool.
         public static void StopAnimationInstantly(Player.MedsController.ObservedMedsControllerClass controller)
         {
             if (_activeRenderer != null)
@@ -306,8 +362,88 @@ namespace Manimal.LoadAmmoAnim.Patches
                 _activeRenderer.enabled = false;
                 _activeRenderer = null;
             }
-            if (controller == null) return;
-            controller.method_9();
+
+            var player = LoadAmmoAnimState.ActivePlayer;
+            if (player?.HandsController is Player.MedsController)
+            {
+                try { player.DestroyController(); }
+                catch (Exception ex)
+                {
+                    Plugin.LogSource?.LogError(
+                        $"[LoadAmmoAnim] DestroyController failed: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+        }
+
+        // put-away state in the bundles animator graph.
+        private const string PutAwayStateName = "USE TO OUT S";
+        private const int PutAwayLayer = 1;
+
+        // clip is ~1s; ceiling at 1.5s before we fall through to teardown.
+        private const float PutAwayMaxWaitSeconds = 1.5f;
+
+        // terminal teardown — play put-away with the mesh still visible, then once
+        // its off-screen disable the mesh, destroy the controller, equip the weapon.
+        // we Animator.Play directly because method_9's SetActive(false) transition
+        // wasnt firing reliably.
+        private static System.Collections.IEnumerator PlayPutawayThenRestore(
+            Player player,
+            Player.MedsController.ObservedMedsControllerClass controller)
+        {
+            var animator = controller?.MedsController_0?.FirearmsAnimator?.Animator;
+
+            if (animator != null)
+            {
+                try
+                {
+                    animator.Play(PutAwayStateName, PutAwayLayer, 0f);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.LogSource?.LogError(
+                        $"[LoadAmmoAnim] Animator.Play({PutAwayStateName}) failed: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            // wait for the put-away to reach ~95% normalized time. timeout in case
+            // the state never enters (typo, layer mismatch, animator torn down).
+            float deadline = Time.unscaledTime + PutAwayMaxWaitSeconds;
+            while (Time.unscaledTime < deadline)
+            {
+                if (animator == null) break;
+                bool done = false;
+                try
+                {
+                    var info = animator.GetCurrentAnimatorStateInfo(PutAwayLayer);
+                    if (info.IsName(PutAwayStateName) && info.normalizedTime >= 0.95f)
+                        done = true;
+                }
+                catch { break; }
+                if (done) break;
+                yield return null;
+            }
+
+            // mag is off-screen, safe to swap mesh state for the next pool reuse.
+            if (_activeRenderer != null)
+            {
+                _activeRenderer.enabled = false;
+                _activeRenderer = null;
+            }
+
+            if (player == null) yield break;
+
+            if (player.HandsController is Player.MedsController)
+            {
+                try { player.DestroyController(); }
+                catch (Exception ex)
+                {
+                    Plugin.LogSource?.LogError(
+                        $"[LoadAmmoAnim] DestroyController failed: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            if (!(player.HandsController is Player.FirearmController))
+                player.TrySetLastEquippedWeapon(true, null);
         }
 
         // with CLA installed _count can dip to 0 for a tick between bullets, so we need
@@ -339,9 +475,10 @@ namespace Manimal.LoadAmmoAnim.Patches
                         // no CLA, stop right away.
                         var player = LoadAmmoAnimState.ActivePlayer;
                         LoadAmmoAnimState.IsOurAnimation = false;
-                        StopAnimationInstantly(controller);
                         if (player != null && !player.IsInventoryOpened)
-                            player.StartCoroutine(RestoreWeaponAfterDelay(player));
+                            player.StartCoroutine(PlayPutawayThenRestore(player, controller));
+                        else
+                            StopAnimationInstantly(controller);
                         break;
                     }
 
@@ -353,9 +490,10 @@ namespace Manimal.LoadAmmoAnim.Patches
                         // grace window is up, the session is really over now.
                         var player = LoadAmmoAnimState.ActivePlayer;
                         LoadAmmoAnimState.IsOurAnimation = false;
-                        StopAnimationInstantly(controller);
                         if (player != null && !player.IsInventoryOpened)
-                            player.StartCoroutine(RestoreWeaponAfterDelay(player));
+                            player.StartCoroutine(PlayPutawayThenRestore(player, controller));
+                        else
+                            StopAnimationInstantly(controller);
                         break;
                     }
 
@@ -367,29 +505,77 @@ namespace Manimal.LoadAmmoAnim.Patches
                 // mag we were loading hit max, time to wrap up.
                 if (sessionMag != null && sessionMag.Count >= sessionMag.MaxCount)
                 {
-                    var player = LoadAmmoAnimState.ActivePlayer;
-                    LoadAmmoAnimState.IsOurAnimation = false;
-                    StopAnimationInstantly(controller);
-
-                    // if Class1204.Start already fired for the next mag, CurrentMag is
-                    // pointing at the new instance. chain straight into a new anim,
-                    // instead of resetting and waiting for OnLoadingStarted to fire.
                     bool nextMagAlreadyLoading = LoadAmmoAnimState.CurrentMag != null
                                                  && LoadAmmoAnimState.CurrentMag != sessionMag;
 
-                    if (nextMagAlreadyLoading && player != null)
+                    // chained mag — play put-away, swap mesh while off-screen, play draw,
+                    // all on the same controller. keeping the controller alive across the
+                    // swap avoids the destroy/recreate gap that leaves PWA pointing at a
+                    // destroyed transform and spams ApplyPosition/ApplyComplexRotation NREs.
+                    if (nextMagAlreadyLoading)
                     {
-                        // _count already counts the new session, so just start the next anim.
-                        player.StartCoroutine(LoadAmmoAnimController.StartNextFrame());
+                        var animator = controller?.MedsController_0?.FirearmsAnimator?.Animator;
+
+                        if (animator != null)
+                        {
+                            try { animator.Play(PutAwayStateName, PutAwayLayer, 0f); }
+                            catch (Exception ex)
+                            {
+                                Plugin.LogSource?.LogError(
+                                    $"[LoadAmmoAnim] chained put-away Play failed: {ex.GetType().Name}: {ex.Message}");
+                            }
+                        }
+
+                        // wait til put-away is ~95% done, then swap while mag is off-screen.
+                        float deadline = Time.unscaledTime + PutAwayMaxWaitSeconds;
+                        while (Time.unscaledTime < deadline)
+                        {
+                            if (animator == null) break;
+                            bool done = false;
+                            try
+                            {
+                                var info = animator.GetCurrentAnimatorStateInfo(PutAwayLayer);
+                                if (info.IsName(PutAwayStateName) && info.normalizedTime >= 0.95f)
+                                    done = true;
+                            }
+                            catch { break; }
+                            if (done) break;
+                            yield return null;
+                        }
+
+                        if (_activeRenderer != null)
+                        {
+                            _activeRenderer.enabled = false;
+                            _activeRenderer = null;
+                        }
+                        ApplyMeshSelection();
+                        sessionMag = LoadAmmoAnimState.CurrentMag;
+                        elapsed = 0f;
+
+                        // play draw to bring the new mesh up; SetActive(true) so the
+                        // animator picks up the use-loop after the draw clip finishes.
+                        if (animator != null)
+                        {
+                            foreach (var stateName in EntryStateCandidates)
+                            {
+                                try { animator.Play(stateName, PutAwayLayer, 0f); break; }
+                                catch { }
+                            }
+                        }
+                        try { controller.MedsController_0?.FirearmsAnimator?.SetActiveParam(true, false); }
+                        catch { }
+
+                        continue;
                     }
+
+                    // terminal — put-away + tear down + equip weapon.
+                    var player = LoadAmmoAnimState.ActivePlayer;
+                    LoadAmmoAnimState.IsOurAnimation = false;
+                    LoadAmmoAnimState.ForceResetLoading();
+                    if (player != null && !player.IsInventoryOpened)
+                        player.StartCoroutine(PlayPutawayThenRestore(player, controller));
                     else
-                    {
-                        // nothing queued. reset so the next OnLoadingStarted triggers
-                        // normally, and re-equip the weapon if the inventory isnt open.
-                        LoadAmmoAnimState.ForceResetLoading();
-                        if (player != null && !player.IsInventoryOpened)
-                            player.StartCoroutine(RestoreWeaponAfterDelay(player));
-                    }
+                        StopAnimationInstantly(controller);
 
                     break;
                 }
@@ -409,15 +595,6 @@ namespace Manimal.LoadAmmoAnim.Patches
             LoadAmmoAnimState.ActiveController = null;
         }
 
-        // small delay, then re-equip the last weapon. waiting a beat lets the meds
-        // put-away transition finish first. without it the equip races the transition
-        // and looks janky.
-        private static System.Collections.IEnumerator RestoreWeaponAfterDelay(Player player)
-        {
-            yield return new UnityEngine.WaitForSeconds(0.1f);
-            if (player != null && player.HandsIsEmpty)
-                player.TrySetLastEquippedWeapon(true, null);
-        }
     }
 
     // catches Class1204.Start, so we can grab the mag's per-bullet speed and template id
@@ -617,6 +794,38 @@ namespace Manimal.LoadAmmoAnim.Patches
             var player = Singleton<GameWorld>.Instance?.MainPlayer;
             if (player != null)
                 player.StartCoroutine(LoadAmmoAnimController.WarmBundleAsync());
+        }
+    }
+
+    // defensive guard — PWA.ApplyPosition derefs HandsContainer.WeaponRootAnim with
+    // no null check, so a controller swap thats left PWA briefly pointing at a
+    // destroyed transform spams NREs every LateUpdate. bailing here costs at most
+    // one frame of stale weapon position.
+    public class ApplyPositionNullGuardPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod() =>
+            AccessTools.Method(typeof(EFT.Animations.ProceduralWeaponAnimation), "ApplyPosition");
+
+        [PatchPrefix]
+        public static bool Prefix(EFT.Animations.ProceduralWeaponAnimation __instance)
+        {
+            if (__instance?.HandsContainer?.WeaponRootAnim == null) return false;
+            return true;
+        }
+    }
+
+    // same guard for ApplyComplexRotation — also derefs WeaponRootAnim and NREs
+    // the same way during controller swaps.
+    public class ApplyComplexRotationNullGuardPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod() =>
+            AccessTools.Method(typeof(EFT.Animations.ProceduralWeaponAnimation), "ApplyComplexRotation");
+
+        [PatchPrefix]
+        public static bool Prefix(EFT.Animations.ProceduralWeaponAnimation __instance)
+        {
+            if (__instance?.HandsContainer?.WeaponRootAnim == null) return false;
+            return true;
         }
     }
 

@@ -47,6 +47,8 @@ namespace Manimal.LoadAmmoAnim
             new LoadAmmoMedsStartPatch().Enable();
             new RaidStartBundleWarmPatch().Enable();
             new Class1204DrawDelayPatch().Enable();
+            new ApplyPositionNullGuardPatch().Enable();
+            new ApplyComplexRotationNullGuardPatch().Enable();
 
             if (ContinuousLoadAmmoCompat.IsInstalled)
                 ContinuousLoadAmmoCompat.EnablePatches();
