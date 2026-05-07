@@ -1,21 +1,15 @@
 {
-  // LoadAmmoAnim hidden animation IFAK
-  // This item is used by LoadAmmoAnimClient to drive the mag-loading animation
-  // via Player.Proceed(MedsItemClass) — it needs a real tracked item with a valid
-  // owner/address for the prefab pooling system to work correctly.
+  // virtual item used by the client to drive the mag-loading animation. cloned
+  // from PortableRangeFinder. parentId matches Directory.Build.props/ModBundleItemParentId.
   "69d69c70ed183ba9c882f7f7": {
-    "itemTplToClone": "590c678286f77426c9660122",
-    "parentId": "5448f39d4bdc2d0a728b4568",
+    "itemTplToClone": "5b80242286f77429445e0b47",
+    "parentId": "8a3f72c1b9d5e60a4fe83b21",
     "handbookParentId": "5b47574386f77428ca22b338",
     "overrideProperties": {
       "Weight": 0,
       "ExaminedByDefault": true,
       "QuestItem": true,
       "CanSellOnRagfair": false,
-      "Prefab": {
-        "path": "assets/content/weapons/usable_items/item_ifak/item_ifak_loot.bundle",
-        "rcid": ""
-      },
       "UsePrefab": {
         "path": "manimal/stanags_container.bundle",
         "rcid": ""
@@ -26,8 +20,8 @@
     },
     "locales": {
       "en": {
-        "name": "[LoadAmmoAnim] Animation IFAK",
-        "shortName": "AnimIFAK",
+        "name": "[LoadAmmoAnim] Animation Bundle",
+        "shortName": "AnimBundle",
         "description": "An internal placeholder item used by LoadAmmoAnim for magazine loading animations. Do not remove."
       }
     },

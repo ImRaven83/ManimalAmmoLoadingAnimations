@@ -11,9 +11,9 @@ namespace Manimal.LoadAmmoAnim.Patches
 {
     // compat shim for ContinuousLoadAmmo (com.ozen.continuousloadammo).
     // CLA listens for OnHandsControllerChanged and cancels its loading session whenever
-    // the hands controller swaps to anything other than empty hands. our Proceed call
-    // swaps to the meds controller, which trips that listener, and CLA bails out after
-    // bullet 1. these patches keep CLA from killing our session.
+    // the hands controller swaps to anything other than empty hands. our Proceed swaps
+    // to LoadAmmoBundleController which trips that listeneri b these patches keep CLA
+    // from killing our session and prevent it from yanking our bundle mid-load.
     internal static class ContinuousLoadAmmoCompat
     {
         private const string ClaGuid = "com.ozen.continuousloadammo";
@@ -31,9 +31,7 @@ namespace Manimal.LoadAmmoAnim.Patches
     }
 
     // CLA calls SetEmptyHands(null) to put the gun away before its loading anim starts.
-    // while we are actively loading we just block it, so it cant race our Proceed.
-    // if loading finished but our anim is still winding down, we tear our anim down
-    // first, then let CLA's call go through.
+    // while were actively loading we block it so it cant race our Proceed.
     public class ClaSetEmptyHandsPatch : ModulePatch
     {
         protected override MethodBase GetTargetMethod() =>
@@ -44,24 +42,14 @@ namespace Manimal.LoadAmmoAnim.Patches
         public static bool Prefix(Player __instance)
         {
             if (!__instance.IsYourPlayer) return true;
-
             if (LoadAmmoAnimState.IsLoading) return false;
-
-            if (LoadAmmoAnimState.IsOurAnimation)
-            {
-                var controller = LoadAmmoAnimState.ActiveController;
-                LoadAmmoAnimState.StopLoop();
-                if (controller != null)
-                    LoadAmmoAnimController.StopAnimationInstantly(controller);
-            }
-
             return true;
         }
     }
 
     // suppresses CLA's StopLoadingOnHandsChange while our anim is active. without
-    // this, it fires every time we Proceed into the meds controller, and kills the
-    // session after bullet 1.
+    // this, it fires every time we Proceed into our bundle controller and kills
+    // the session after bullet 1.
     public class ClaStopOnHandsChangePatch : ModulePatch
     {
         protected override MethodBase GetTargetMethod()
@@ -95,8 +83,8 @@ namespace Manimal.LoadAmmoAnim.Patches
         }
     }
 
-    // CLA calls TrySetLastEquippedWeapon when its own session is wrapping up. thats
-    // our cue to tear our anim down too, so we dont fight CLA for the weapon equip.
+    // CLA calls TrySetLastEquippedWeapon when its session is wrapping up. thats our
+    // cue to tear our anim down so we dont fight CLA for the weapon equip.
     public class ClaTrySetLastEquippedWeaponPatch : ModulePatch
     {
         protected override MethodBase GetTargetMethod() =>
@@ -109,10 +97,8 @@ namespace Manimal.LoadAmmoAnim.Patches
             if (!__instance.IsYourPlayer || !LoadAmmoAnimState.IsOurAnimation)
                 return;
 
-            var controller = LoadAmmoAnimState.ActiveController;
-            LoadAmmoAnimState.StopLoop();
-            if (controller != null)
-                LoadAmmoAnimController.StopAnimationInstantly(controller);
+            LoadAmmoAnimState.IsOurAnimation = false;
+            LoadAmmoAnimDriver.StopAnimationInstantly(__instance);
         }
     }
 }

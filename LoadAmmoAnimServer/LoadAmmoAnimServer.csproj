@@ -19,7 +19,7 @@
     <PackageReference Include="SPTarkov.Common" Version="4.0.13" />
     <PackageReference Include="SPTarkov.DI" Version="4.0.13" />
     <PackageReference Include="SPTarkov.Server.Core" Version="4.0.13" />
-    <PackageReference Include="WTT-ServerCommonLib" Version="2.0.15" />
+    <PackageReference Include="WTT-ServerCommonLib" Version="2.0.20" />
   </ItemGroup>
 
   <!--
@@ -30,9 +30,7 @@
     Were just leveraging MSBuild's project graph for build ordering.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\LoadAmmoAnimClient\LoadAmmoAnimClient.csproj"
-                      ReferenceOutputAssembly="false"
-                      Private="false" />
+    <ProjectReference Include="..\LoadAmmoAnimClient\LoadAmmoAnimClient.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <!--
@@ -73,8 +71,7 @@
     <ItemGroup>
       <StaticModFiles Include="$(ProjectDir)..\ServerModFiles\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(StaticModFiles)"
-          DestinationFiles="@(StaticModFiles->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(StaticModFiles)" DestinationFiles="@(StaticModFiles->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
   <Target Name="PackageModForDistribution" AfterTargets="Build">
@@ -91,8 +88,7 @@
     <ItemGroup>
       <StaticModFilesForZip Include="$(ProjectDir)..\ServerModFiles\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(StaticModFilesForZip)"
-          DestinationFiles="@(StaticModFilesForZip->'$(ModPackageDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(StaticModFilesForZip)" DestinationFiles="@(StaticModFilesForZip->'$(ModPackageDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
     <ZipDirectory SourceDirectory="$(TempPackageDir)" DestinationFile="$(ProjectDir)$(ZipFileName)" Overwrite="true" />
     <RemoveDir Directories="$(TempPackageDir)" />
     <Message Text="--- Mod successfully packaged at: $(ProjectDir)$(ZipFileName) ---" Importance="high" />
@@ -124,35 +120,24 @@
     <MakeDir Directories="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer" />
 
     <!-- Server DLL -->
-    <Copy SourceFiles="$(TargetPath)"
-          DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer" />
 
     <!-- Client DLL — should always be there given the ProjectReference, but warn if not -->
-    <Warning Text="Client DLL missing at $(ClientDllPath) — release zip will not include the client"
-             Condition="!Exists('$(ClientDllPath)')" />
-    <Copy SourceFiles="$(ClientDllPath)"
-          DestinationFolder="$(ReleaseStagingDir)\BepInEx\plugins\LoadAmmoAnim"
-          Condition="Exists('$(ClientDllPath)')" />
+    <Warning Text="Client DLL missing at $(ClientDllPath) — release zip will not include the client" Condition="!Exists('$(ClientDllPath)')" />
+    <Copy SourceFiles="$(ClientDllPath)" DestinationFolder="$(ReleaseStagingDir)\BepInEx\plugins\LoadAmmoAnim" Condition="Exists('$(ClientDllPath)')" />
 
     <!-- ServerModFiles (bundles.json, db/*.jsonc) -->
     <ItemGroup>
       <ReleaseStaticFiles Include="$(ProjectDir)..\ServerModFiles\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(ReleaseStaticFiles)"
-          DestinationFiles="@(ReleaseStaticFiles->'$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(ReleaseStaticFiles)" DestinationFiles="@(ReleaseStaticFiles->'$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\%(RecursiveDir)%(Filename)%(Extension)')" />
 
     <!-- Asset bundle from deployed install (not in repo) -->
-    <Warning Text="Bundle file missing at $(DeployedBundlePath) — release zip will not include the .bundle. Re-export from Unity or copy the bundle into your deployed install path before next packaging."
-             Condition="!Exists('$(DeployedBundlePath)')" />
-    <MakeDir Directories="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal"
-             Condition="Exists('$(DeployedBundlePath)')" />
-    <Copy SourceFiles="$(DeployedBundlePath)"
-          DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal"
-          Condition="Exists('$(DeployedBundlePath)')" />
+    <Warning Text="Bundle file missing at $(DeployedBundlePath) — release zip will not include the .bundle. Re-export from Unity or copy the bundle into your deployed install path before next packaging." Condition="!Exists('$(DeployedBundlePath)')" />
+    <MakeDir Directories="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
+    <Copy SourceFiles="$(DeployedBundlePath)" DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
 
-    <ZipDirectory SourceDirectory="$(ReleaseStagingDir)"
-                  DestinationFile="$(ReleaseZipPath)"
-                  Overwrite="true" />
+    <ZipDirectory SourceDirectory="$(ReleaseStagingDir)" DestinationFile="$(ReleaseZipPath)" Overwrite="true" />
     <RemoveDir Directories="$(ReleaseStagingDir)" />
 
     <Message Text="--- Release zip ready: $(ReleaseZipPath) ---" Importance="high" />

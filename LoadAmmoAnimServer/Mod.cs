@@ -30,6 +30,8 @@ public class LoadAmmoAnimServer(
     {
         Assembly assembly = Assembly.GetExecutingAssembly();
 
+        await wttCommon.CustomItemParentService.CreateCustomParents(assembly);
         await wttCommon.CustomItemServiceExtended.CreateCustomItems(assembly);
+
     }
 }
