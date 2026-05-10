@@ -6,59 +6,141 @@ using Manimal.LoadAmmoAnim.CustomEFTData;
 using SPT.Reflection.Patching;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Manimal.LoadAmmoAnim.Patches
 {
-    // shared state for all the driver's patches. _count tracks how many Class1204
-    // sessions are alive right now, so we know when to start and stop the visible anim.
-    internal static class LoadAmmoAnimState
+    // event seam used by the Fika compat assembly. the main client raises these
+    // for local-player session lifecycle changes, the Fika layer subscribes and
+    // turns them into network packets. fire-and-forget — handlers must not throw.
+    internal static class LoadAmmoAnimEvents
     {
-        private static int _count;
+        public static event Action<Player, string, float> AnimStarted;
+        public static event Action<Player, bool> AnimStopped;
+        public static event Action<Player, string> MagSwapped;
 
-        public static bool IsLoading => _count > 0;
-        public static bool IsOurAnimation;
-        public static LoadAmmoBundleController ActiveController;
-        public static Player ActivePlayer;
-        public static Coroutine LoopCoroutine;
+        internal static void RaiseStarted(Player p, string magTpl, float speed)
+        {
+            try { AnimStarted?.Invoke(p, magTpl, speed); }
+            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] AnimStarted handler threw: {ex.Message}"); }
+        }
 
-        // seconds per round at the player's current mag drills level. we re-read it
-        // from Class1204.Float_0 every session, so skill ups take effect right away.
-        public static float LoadOneAmmoSpeed = 1f;
+        internal static void RaiseStopped(Player p, bool playPutAway)
+        {
+            try { AnimStopped?.Invoke(p, playPutAway); }
+            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] AnimStopped handler threw: {ex.Message}"); }
+        }
+
+        internal static void RaiseMagSwapped(Player p, string magTpl)
+        {
+            try { MagSwapped?.Invoke(p, magTpl); }
+            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] MagSwapped handler threw: {ex.Message}"); }
+        }
+    }
+
+    // per-player session bag. one of these per Player that has ever started a load.
+    // keeps everything that used to be on the static LoadAmmoAnimState class so
+    // multi-player setups (Fika) can run independent sessions side by side.
+    internal sealed class PlayerSession
+    {
+        // tracks how many Class1204 sessions are alive for this player. the visible
+        // anim only starts on the 0 to 1 edge.
+        public int LoadingCount;
+
+        public bool IsOurAnimation;
+        public LoadAmmoBundleController ActiveController;
+        public Coroutine LoopCoroutine;
+
+        // seconds per round at the player's current mag drills level. re-read from
+        // Class1204.Float_0 every session so skill ups take effect right away.
+        public float LoadOneAmmoSpeed = 1f;
 
         // armed at the start of each session, consumed by Class1204DrawDelayPatch on
         // the first bullet only. that way we only stretch the initial delay, not every one.
-        public static bool DrawPhasePending;
+        public bool DrawPhasePending;
 
         // template id of the mag we are loading. captured in Class1204.Start, so
         // ApplyMeshSelection knows which mesh to switch on.
-        public static string CurrentMagTemplateId;
+        public string CurrentMagTemplateId;
 
         // the live mag item. AnimLoop checks this every frame to know when its full
         // and we should stop.
-        public static MagazineItemClass CurrentMag;
+        public MagazineItemClass CurrentMag;
 
-        public static void OnLoadingStarted()
+        // the renderer we enabled this session. cleared in tear-down so the bundle
+        // returns to pool clean.
+        public MeshRenderer ActiveRenderer;
+
+        public bool IsLoading => LoadingCount > 0;
+    }
+
+    // registry of per-player sessions. patches that have a Player handle look up
+    // through here. patches without one (rare) fall back to MainPlayer.
+    internal static class LoadAmmoAnimState
+    {
+        private static readonly Dictionary<Player, PlayerSession> _sessions =
+            new Dictionary<Player, PlayerSession>();
+
+        public static PlayerSession Get(Player player)
         {
+            if (player == null) return null;
+            if (!_sessions.TryGetValue(player, out var s))
+                _sessions[player] = s = new PlayerSession();
+            return s;
+        }
+
+        public static PlayerSession TryGet(Player player)
+        {
+            if (player == null) return null;
+            _sessions.TryGetValue(player, out var s);
+            return s;
+        }
+
+        public static void Clear(Player player)
+        {
+            if (player == null) return;
+            _sessions.Remove(player);
+        }
+
+        // global probe for patches without a player handle (eg. CLA's static methods).
+        public static bool AnyIsOurAnimation()
+        {
+            foreach (var s in _sessions.Values)
+                if (s.IsOurAnimation) return true;
+            return false;
+        }
+
+        public static void OnLoadingStarted(Player player)
+        {
+            if (player == null) return;
+            var s = Get(player);
             // only start a new anim on the 0 to 1 edge. anything else is just an extra
             // session piling on top of one we are already animating for.
-            if (_count++ == 0 && !IsOurAnimation)
+            if (s.LoadingCount++ == 0 && !s.IsOurAnimation)
             {
-                DrawPhasePending = true;
-                var player = Singleton<GameWorld>.Instance?.MainPlayer;
-                player?.StartCoroutine(LoadAmmoAnimDriver.StartNextFrame());
+                s.DrawPhasePending = true;
+                player.StartCoroutine(LoadAmmoAnimDriver.StartNextFrame(player));
+                // notify Fika compat layer so it can broadcast.
+                LoadAmmoAnimEvents.RaiseStarted(player, s.CurrentMagTemplateId, s.LoadOneAmmoSpeed);
             }
         }
 
-        public static void OnLoadingEnded()
+        public static void OnLoadingEnded(Player player)
         {
-            if (--_count < 0) _count = 0;
+            var s = TryGet(player);
+            if (s == null) return;
+            if (--s.LoadingCount < 0) s.LoadingCount = 0;
         }
 
-        // hard reset for _count, used when the stall logic decides things have gone off the rails.
-        internal static void ForceResetLoading() { _count = 0; }
+        // hard reset for LoadingCount, used when the stall logic decides things have gone off the rails.
+        internal static void ForceResetLoading(Player player)
+        {
+            var s = TryGet(player);
+            if (s != null) s.LoadingCount = 0;
+        }
     }
 
     // creates the virtual bundle item, runs the controller swap, drives the per-frame
@@ -76,25 +158,22 @@ namespace Manimal.LoadAmmoAnim.Patches
         // ceiling on the put-away wait. clip is roughly 1s.
         private const float PutAwayMaxWaitSeconds = 1.5f;
 
-        // CLA can dip _count to 0 for a tick between bullets, so we wait this long
-        // before deciding the session is actually over.
+        // CLA can dip LoadingCount to 0 for a tick between bullets, so we wait this
+        // long before deciding the session is actually over.
         private const float ClaStopTimeoutSeconds = 0.3f;
 
-        // the renderer we enabled this session. disabled in tear-down so the bundle
-        // returns to pool clean. all meshes start disabled in the bundle.
-        private static MeshRenderer _activeRenderer;
-
+        // process-wide flag, the asset cache is shared across players.
         private static bool _bundleWarmed;
 
-        public static IEnumerator StartNextFrame()
+        public static IEnumerator StartNextFrame(Player player)
         {
             // wait one frame so Class1204.Start can finish its synchronous setup.
             // proceeding inline races the inventory state.
             yield return null;
-            if (!LoadAmmoAnimState.IsLoading) yield break;
-
-            var player = Singleton<GameWorld>.Instance?.MainPlayer;
             if (player == null) yield break;
+
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session == null || !session.IsLoading) yield break;
 
             var bundleItem = CreateBundleItem();
             if (bundleItem == null)
@@ -133,8 +212,8 @@ namespace Manimal.LoadAmmoAnim.Patches
 
         private static void TryStart(Player player, LoadAmmoBundleItem bundleItem)
         {
-            LoadAmmoAnimState.IsOurAnimation = true;
-            LoadAmmoAnimState.ActivePlayer = player;
+            var session = LoadAmmoAnimState.Get(player);
+            session.IsOurAnimation = true;
 
             try { player.StopBlindFire(); } catch { }
             try { player.RemoveLeftHandItem(); } catch { }
@@ -156,6 +235,7 @@ namespace Manimal.LoadAmmoAnim.Patches
         // UsePrefab where our bundle path lives.
         private static void CreateAndSpawnBundleController(Player player, LoadAmmoBundleItem bundleItem)
         {
+            var session = LoadAmmoAnimState.Get(player);
             try
             {
                 if (player.HandsController != null)
@@ -177,7 +257,7 @@ namespace Manimal.LoadAmmoAnim.Patches
                 if (controller == null)
                 {
                     Plugin.LogSource?.LogError("[LoadAmmoAnim] smethod_1 returned null controller.");
-                    LoadAmmoAnimState.IsOurAnimation = false;
+                    session.IsOurAnimation = false;
                     return;
                 }
 
@@ -190,22 +270,21 @@ namespace Manimal.LoadAmmoAnim.Patches
                 // the entire draw, not just the post-draw loop.
                 player.SpawnController(controller, () => { });
 
-                LoadAmmoAnimState.ActiveController = controller;
+                session.ActiveController = controller;
 
                 // tie playback to the player's current mag-drills speed.
                 var firearmsAnim = controller.FirearmsAnimator;
-                if (firearmsAnim != null && LoadAmmoAnimState.LoadOneAmmoSpeed > 0f)
-                    firearmsAnim.SetAnimationSpeed(1f / LoadAmmoAnimState.LoadOneAmmoSpeed);
+                if (firearmsAnim != null && session.LoadOneAmmoSpeed > 0f)
+                    firearmsAnim.SetAnimationSpeed(1f / session.LoadOneAmmoSpeed);
 
-                ApplyMeshSelection();
-                LoadAmmoAnimState.LoopCoroutine =
-                    player.StartCoroutine(AnimLoop(controller));
+                ApplyMeshSelection(player);
+                session.LoopCoroutine = player.StartCoroutine(AnimLoop(player, controller));
             }
             catch (Exception ex)
             {
                 Plugin.LogSource?.LogError(
                     $"[LoadAmmoAnim] CreateAndSpawnBundleController threw: {ex.GetType().Name}: {ex.Message}");
-                LoadAmmoAnimState.IsOurAnimation = false;
+                session.IsOurAnimation = false;
             }
         }
 
@@ -235,7 +314,6 @@ namespace Manimal.LoadAmmoAnim.Patches
         public static IEnumerator WarmBundleAsync()
         {
             _bundleWarmed = false;
-            _activeRenderer = null;
 
             string bundlePath = null;
             try
@@ -272,11 +350,14 @@ namespace Manimal.LoadAmmoAnim.Patches
         // finds the target renderer and enables it. all other meshes are already
         // disabled in the bundle. controller's prefab root is the spawned bundle
         // gameobject, so GetComponentsInChildren only walks our small bundle.
-        private static void ApplyMeshSelection()
+        private static void ApplyMeshSelection(Player player)
         {
-            string targetMesh = MagAnimLookup.GetMeshName(LoadAmmoAnimState.CurrentMagTemplateId);
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session == null) return;
 
-            var prefabRoot = LoadAmmoAnimState.ActiveController?.ControllerGameObject;
+            string targetMesh = MagAnimLookup.GetMeshName(session.CurrentMagTemplateId);
+
+            var prefabRoot = session.ActiveController?.ControllerGameObject;
             if (prefabRoot == null)
             {
                 Plugin.LogSource?.LogWarning(
@@ -288,7 +369,7 @@ namespace Manimal.LoadAmmoAnim.Patches
             {
                 if (mr.gameObject.name != targetMesh) continue;
                 mr.enabled = true;
-                _activeRenderer = mr;
+                session.ActiveRenderer = mr;
                 return;
             }
 
@@ -299,10 +380,11 @@ namespace Manimal.LoadAmmoAnim.Patches
         // immediate teardown. used when bailing without animating.
         public static void StopAnimationInstantly(Player player)
         {
-            if (_activeRenderer != null)
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session?.ActiveRenderer != null)
             {
-                _activeRenderer.enabled = false;
-                _activeRenderer = null;
+                session.ActiveRenderer.enabled = false;
+                session.ActiveRenderer = null;
             }
             if (player?.HandsController is LoadAmmoBundleController)
             {
@@ -333,10 +415,11 @@ namespace Manimal.LoadAmmoAnim.Patches
                 yield return null;
             }
 
-            if (_activeRenderer != null)
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session?.ActiveRenderer != null)
             {
-                _activeRenderer.enabled = false;
-                _activeRenderer = null;
+                session.ActiveRenderer.enabled = false;
+                session.ActiveRenderer = null;
             }
 
             if (player == null) yield break;
@@ -355,31 +438,109 @@ namespace Manimal.LoadAmmoAnim.Patches
                 player.TrySetLastEquippedWeapon(true, null);
         }
 
-        private static IEnumerator AnimLoop(LoadAmmoBundleController controller)
+        // entry point for the Fika compat layer to start the anim on a remote
+        // (observed) player when a Start packet arrives. doesnt fire AnimStarted —
+        // only the local Class1204 path does, to avoid re-broadcast loops.
+        //
+        // sets LoadingCount = 1 manually so AnimLoop's IsLoading check passes
+        // until StopBundleAnim flips it back. observed players have no Class1204
+        // to drive the count naturally.
+        internal static void StartBundleAnim(Player player, string magTemplateId, float loadOneAmmoSpeed)
         {
+            if (player == null) return;
+            var session = LoadAmmoAnimState.Get(player);
+            // already running for this player (eg. duplicate packet) — ignore.
+            if (session.IsOurAnimation) return;
+
+            session.LoadOneAmmoSpeed = loadOneAmmoSpeed > 0f ? loadOneAmmoSpeed : 1f;
+            session.CurrentMagTemplateId = magTemplateId;
+            session.CurrentMag = null;          // observed: we dont have the source's mag item
+            session.LoadingCount = 1;           // synthetic, kept up by Stop packet
+            session.DrawPhasePending = false;   // Class1204DrawDelayPatch is local-only
+
+            player.StartCoroutine(StartNextFrame(player));
+        }
+
+        // entry point for the Fika compat layer to end an observed player's anim
+        // when a Stop packet arrives. playPutAway=true gives the put-away clip,
+        // false destroys instantly. doesnt fire AnimStopped to avoid re-broadcast.
+        internal static void StopBundleAnim(Player player, bool playPutAway)
+        {
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session == null) return;
+
+            var controller = session.ActiveController;
+            session.LoadingCount = 0;
+            session.IsOurAnimation = false;
+
+            if (playPutAway && controller != null && player != null)
+                player.StartCoroutine(PlayPutawayThenRestore(player, controller));
+            else
+                StopAnimationInstantly(player);
+        }
+
+        // entry point for the Fika compat layer to swap the visible mag mesh on
+        // an observed player when a SwapMesh packet arrives. mirrors the inline
+        // chained-mag block inside AnimLoop. doesnt fire MagSwapped.
+        internal static void SwapMagMesh(Player player, string newMagTemplateId)
+        {
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session == null || !session.IsOurAnimation) return;
+            session.CurrentMagTemplateId = newMagTemplateId;
+            var controller = session.ActiveController;
+            if (controller != null && player != null)
+                player.StartCoroutine(SwapMagMeshCoroutine(player, controller));
+        }
+
+        private static IEnumerator SwapMagMeshCoroutine(Player player, LoadAmmoBundleController controller)
+        {
+            controller.PlayPutAway();
+
+            float deadline = Time.unscaledTime + PutAwayMaxWaitSeconds;
+            while (Time.unscaledTime < deadline)
+            {
+                if (controller == null) break;
+                if (controller.IsPutAwayNearlyDone()) break;
+                yield return null;
+            }
+
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session?.ActiveRenderer != null)
+            {
+                session.ActiveRenderer.enabled = false;
+                session.ActiveRenderer = null;
+            }
+            ApplyMeshSelection(player);
+
+            controller.PlayDraw();
+        }
+
+        private static IEnumerator AnimLoop(Player player, LoadAmmoBundleController controller)
+        {
+            var session = LoadAmmoAnimState.Get(player);
             bool claInstalled = ContinuousLoadAmmoCompat.IsInstalled;
             float idleSince = -1f;
 
             // snapshot the mag this session was started for. once the next mag's
             // Class1204.Start fires, CurrentMag gets overwritten, so we cant trust
             // it inside the loop body.
-            MagazineItemClass sessionMag = LoadAmmoAnimState.CurrentMag;
+            MagazineItemClass sessionMag = session.CurrentMag;
 
-            while (LoadAmmoAnimState.IsOurAnimation)
+            while (session.IsOurAnimation)
             {
                 yield return null;
 
-                if (!LoadAmmoAnimState.IsOurAnimation || controller == null)
+                if (!session.IsOurAnimation || controller == null)
                     break;
 
-                if (!LoadAmmoAnimState.IsLoading)
+                if (!session.IsLoading)
                 {
                     if (!claInstalled)
                     {
                         // always run put-away + destroy + re-equip, regardless of
                         // inventory state. instant-teardown leaves PWA stale.
-                        var player = LoadAmmoAnimState.ActivePlayer;
-                        LoadAmmoAnimState.IsOurAnimation = false;
+                        session.IsOurAnimation = false;
+                        LoadAmmoAnimEvents.RaiseStopped(player, true);
                         if (player != null)
                             player.StartCoroutine(PlayPutawayThenRestore(player, controller));
                         break;
@@ -388,8 +549,8 @@ namespace Manimal.LoadAmmoAnim.Patches
                     if (idleSince < 0f) idleSince = Time.realtimeSinceStartup;
                     if (Time.realtimeSinceStartup - idleSince >= ClaStopTimeoutSeconds)
                     {
-                        var player = LoadAmmoAnimState.ActivePlayer;
-                        LoadAmmoAnimState.IsOurAnimation = false;
+                        session.IsOurAnimation = false;
+                        LoadAmmoAnimEvents.RaiseStopped(player, true);
                         if (player != null)
                             player.StartCoroutine(PlayPutawayThenRestore(player, controller));
                         break;
@@ -402,8 +563,8 @@ namespace Manimal.LoadAmmoAnim.Patches
 
                 if (sessionMag != null && sessionMag.Count >= sessionMag.MaxCount)
                 {
-                    bool nextMagAlreadyLoading = LoadAmmoAnimState.CurrentMag != null
-                                                 && LoadAmmoAnimState.CurrentMag != sessionMag;
+                    bool nextMagAlreadyLoading = session.CurrentMag != null
+                                                 && session.CurrentMag != sessionMag;
 
                     // chained mag. play put-away, swap mesh while off-screen, play
                     // draw, all on the same controller. keeps the controller alive
@@ -420,31 +581,32 @@ namespace Manimal.LoadAmmoAnim.Patches
                             yield return null;
                         }
 
-                        if (_activeRenderer != null)
+                        if (session.ActiveRenderer != null)
                         {
-                            _activeRenderer.enabled = false;
-                            _activeRenderer = null;
+                            session.ActiveRenderer.enabled = false;
+                            session.ActiveRenderer = null;
                         }
-                        ApplyMeshSelection();
-                        sessionMag = LoadAmmoAnimState.CurrentMag;
+                        ApplyMeshSelection(player);
+                        sessionMag = session.CurrentMag;
+                        LoadAmmoAnimEvents.RaiseMagSwapped(player, session.CurrentMagTemplateId);
 
                         controller.PlayDraw();
                         continue;
                     }
 
                     // terminal. put-away + destroy + re-equip.
-                    var player2 = LoadAmmoAnimState.ActivePlayer;
-                    LoadAmmoAnimState.IsOurAnimation = false;
-                    LoadAmmoAnimState.ForceResetLoading();
-                    if (player2 != null)
-                        player2.StartCoroutine(PlayPutawayThenRestore(player2, controller));
+                    session.IsOurAnimation = false;
+                    LoadAmmoAnimState.ForceResetLoading(player);
+                    LoadAmmoAnimEvents.RaiseStopped(player, true);
+                    if (player != null)
+                        player.StartCoroutine(PlayPutawayThenRestore(player, controller));
 
                     break;
                 }
             }
 
-            LoadAmmoAnimState.LoopCoroutine = null;
-            LoadAmmoAnimState.ActiveController = null;
+            session.LoopCoroutine = null;
+            session.ActiveController = null;
         }
     }
 
@@ -464,6 +626,10 @@ namespace Manimal.LoadAmmoAnim.Patches
         [PatchPrefix]
         private static void Prefix(object __instance)
         {
+            var player = Singleton<GameWorld>.Instance?.MainPlayer;
+            if (player == null) return;
+            var session = LoadAmmoAnimState.Get(player);
+
             var type = __instance.GetType();
 
             // Float_0 is loadOneAmmoSpeed (seconds per round at the player's current
@@ -475,7 +641,7 @@ namespace Manimal.LoadAmmoAnim.Patches
             if (_float0Field != null)
             {
                 float speed = (float)_float0Field.GetValue(__instance);
-                if (speed > 0f) LoadAmmoAnimState.LoadOneAmmoSpeed = speed;
+                if (speed > 0f) session.LoadOneAmmoSpeed = speed;
             }
 
             // bsg's obfuscator names this field after its type, so the field name
@@ -484,27 +650,29 @@ namespace Manimal.LoadAmmoAnim.Patches
                 _magazineField = type.GetField("MagazineItemClass",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-            LoadAmmoAnimState.CurrentMagTemplateId = null;
-            LoadAmmoAnimState.CurrentMag = null;
+            session.CurrentMagTemplateId = null;
+            session.CurrentMag = null;
             if (_magazineField != null)
             {
                 var mag = _magazineField.GetValue(__instance) as MagazineItemClass;
                 if (mag != null)
                 {
-                    LoadAmmoAnimState.CurrentMagTemplateId = mag.TemplateId;
-                    LoadAmmoAnimState.CurrentMag = mag;
+                    session.CurrentMagTemplateId = mag.TemplateId;
+                    session.CurrentMag = mag;
                 }
             }
 
-            LoadAmmoAnimState.OnLoadingStarted();
+            LoadAmmoAnimState.OnLoadingStarted(player);
         }
 
         [PatchPostfix]
         private static void Postfix(Task<IResult> __result)
         {
+            var player = Singleton<GameWorld>.Instance?.MainPlayer;
+            if (player == null) return;
             // Class1204.Start returns a Task that resolves when the session ends.
-            // hook the continuation so _count decrements no matter how it ends.
-            __result?.ContinueWith(_ => LoadAmmoAnimState.OnLoadingEnded());
+            // hook the continuation so LoadingCount decrements no matter how it ends.
+            __result?.ContinueWith(_ => LoadAmmoAnimState.OnLoadingEnded(player));
         }
     }
 
@@ -522,15 +690,18 @@ namespace Manimal.LoadAmmoAnim.Patches
         [PatchPrefix]
         public static bool Prefix(object __instance, ref Task __result)
         {
-            if (!LoadAmmoAnimState.DrawPhasePending) return true;
-            LoadAmmoAnimState.DrawPhasePending = false;
+            var player = Singleton<GameWorld>.Instance?.MainPlayer;
+            if (player == null) return true;
+            var session = LoadAmmoAnimState.TryGet(player);
+            if (session == null || !session.DrawPhasePending) return true;
+            session.DrawPhasePending = false;
 
             // animator runs at 1 / LoadOneAmmoSpeed, so the actual draw-clip duration
             // is DrawClipSeconds * LoadOneAmmoSpeed. without this, fast loads finish
             // the draw and idle, slow loads cut it short.
-            int normalMs = Mathf.CeilToInt(LoadAmmoAnimState.LoadOneAmmoSpeed * 1000f);
+            int normalMs = Mathf.CeilToInt(session.LoadOneAmmoSpeed * 1000f);
             int drawMs   = Mathf.RoundToInt(
-                LoadAmmoAnimDriver.DrawClipSeconds * LoadAmmoAnimState.LoadOneAmmoSpeed * 1000f);
+                LoadAmmoAnimDriver.DrawClipSeconds * session.LoadOneAmmoSpeed * 1000f);
 
             __result = Task.Delay(drawMs + normalMs);
             return false;

@@ -42,7 +42,8 @@ namespace Manimal.LoadAmmoAnim.Patches
         public static bool Prefix(Player __instance)
         {
             if (!__instance.IsYourPlayer) return true;
-            if (LoadAmmoAnimState.IsLoading) return false;
+            var session = LoadAmmoAnimState.TryGet(__instance);
+            if (session != null && session.IsLoading) return false;
             return true;
         }
     }
@@ -79,7 +80,11 @@ namespace Manimal.LoadAmmoAnim.Patches
         [PatchPrefix]
         public static bool Prefix()
         {
-            return !LoadAmmoAnimState.IsOurAnimation;
+            // CLA only manages the local player. block when our local anim is active.
+            var player = Singleton<GameWorld>.Instance?.MainPlayer;
+            if (player == null) return true;
+            var session = LoadAmmoAnimState.TryGet(player);
+            return session == null || !session.IsOurAnimation;
         }
     }
 
@@ -94,10 +99,11 @@ namespace Manimal.LoadAmmoAnim.Patches
         [PatchPrefix]
         public static void Prefix(Player __instance)
         {
-            if (!__instance.IsYourPlayer || !LoadAmmoAnimState.IsOurAnimation)
-                return;
+            if (!__instance.IsYourPlayer) return;
+            var session = LoadAmmoAnimState.TryGet(__instance);
+            if (session == null || !session.IsOurAnimation) return;
 
-            LoadAmmoAnimState.IsOurAnimation = false;
+            session.IsOurAnimation = false;
             LoadAmmoAnimDriver.StopAnimationInstantly(__instance);
         }
     }
