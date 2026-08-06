@@ -16,7 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WTT-ClientCommonLib" Version="2.0.20" />
+    <PackageReference Include="WTT-ClientCommonLib" Version="3.0.3" />
   </ItemGroup>
 
   <ItemGroup>
