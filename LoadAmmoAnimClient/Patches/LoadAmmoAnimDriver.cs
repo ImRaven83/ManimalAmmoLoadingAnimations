@@ -39,7 +39,7 @@ namespace Manimal.LoadAmmoAnim.Patches
 
         // the live mag item. AnimLoop checks this every frame to know when its full
         // and we should stop.
-        public MagazineItemClass CurrentMag;
+        public Magazine CurrentMag;
 
         // the renderer we enabled this session. cleared in tear-down so the bundle
         // returns to pool clean.
@@ -416,7 +416,7 @@ namespace Manimal.LoadAmmoAnim.Patches
             // snapshot the mag this session was started for. once the next mag's
             // Class1204.Start fires, CurrentMag gets overwritten, so we cant trust
             // it inside the loop body.
-            MagazineItemClass sessionMag = session.CurrentMag;
+            Magazine sessionMag = session.CurrentMag;
 
             while (session.IsOurAnimation)
             {
@@ -507,7 +507,7 @@ namespace Manimal.LoadAmmoAnim.Patches
 
         protected override MethodBase GetTargetMethod()
         {
-            var class1204 = AccessTools.Inner(typeof(Player.PlayerInventoryController), "Class1204");
+            var class1204 = AccessTools.Inner(typeof(Player.PlayerInventoryController), "LoadMagazineProcess");
             return AccessTools.Method(class1204, "Start");
         }
 
@@ -532,17 +532,19 @@ namespace Manimal.LoadAmmoAnim.Patches
                 if (speed > 0f) session.LoadOneAmmoSpeed = speed;
             }
 
-            // bsg's obfuscator names this field after its type, so the field name
-            // really is "MagazineItemClass".
+            // bsg's obfuscator used to name this field after its type ("MagazineItemClass").
+            // post-4.1 deobfuscation the type is "Magazine" (see EFT.InventoryLogic.Magazine),
+            // so this is inferred to follow the same convention. unconfirmed against the
+            // real assembly — verify if this field lookup comes up null at runtime.
             if (_magazineField == null)
-                _magazineField = type.GetField("MagazineItemClass",
+                _magazineField = type.GetField("Magazine",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
             session.CurrentMagTemplateId = null;
             session.CurrentMag = null;
             if (_magazineField != null)
             {
-                var mag = _magazineField.GetValue(__instance) as MagazineItemClass;
+                var mag = _magazineField.GetValue(__instance) as Magazine;
                 if (mag != null)
                 {
                     session.CurrentMagTemplateId = mag.TemplateId;
@@ -571,7 +573,7 @@ namespace Manimal.LoadAmmoAnim.Patches
     {
         protected override MethodBase GetTargetMethod()
         {
-            var class1204 = AccessTools.Inner(typeof(Player.PlayerInventoryController), "Class1204");
+            var class1204 = AccessTools.Inner(typeof(Player.PlayerInventoryController), "LoadMagazineProcess");
             return AccessTools.Method(class1204, "method_5");
         }
 
