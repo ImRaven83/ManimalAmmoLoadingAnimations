@@ -1,12 +1,14 @@
 using System.Reflection;
 using EFT.InventoryLogic;
+using EFT.NextObservedPlayer;
 using HarmonyLib;
 using Manimal.LoadAmmoAnim.CustomEFTData;
 using SPT.Reflection.Patching;
 
 namespace Manimal.LoadAmmoAnim.Patches
 {
-    // patches GClass2970.smethod_0, the dispatcher that returns the GInterface323
+    // patches GClass2970.smethod_0, the dispatcher that returns the
+    // IObservedUsableItem (formerly GInterface323 pre-4.1 deobfuscation)
     // implementation for a given item type during the controller swap chain.
     // vanilla returns specific classes for radio transmitter and rangefinder,
     // otherwise null. returning null for our item silently breaks downstream
@@ -19,7 +21,7 @@ namespace Manimal.LoadAmmoAnim.Patches
                 BindingFlags.Public | BindingFlags.Static);
 
         [PatchPrefix]
-        private static bool Prefix(ref GInterface323 __result, Item item)
+        private static bool Prefix(ref IObservedUsableItem __result, Item item)
         {
             if (item is LoadAmmoBundleItem)
             {
