@@ -31,10 +31,6 @@
   -->
   <ItemGroup>
     <ProjectReference Include="..\LoadAmmoAnimClient\LoadAmmoAnimClient.csproj" ReferenceOutputAssembly="false" Private="false" />
-    <!-- Fika compat client. ReferenceOutputAssembly=false because the server runtime
-         doesnt link it; we just need build order so PackageFullRelease can pick up
-         the compiled DLL. -->
-    <ProjectReference Include="..\LoadAmmoAnimClientFika\LoadAmmoAnimClientFika.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <!--
@@ -114,7 +110,6 @@
       <ReleaseStagingDir>$(ProjectDir)..\obj\ReleasePackage</ReleaseStagingDir>
       <ReleaseZipPath>$(ProjectDir)..\LoadAmmoAnim-$(Version).zip</ReleaseZipPath>
       <ClientDllPath>$(ProjectDir)..\LoadAmmoAnimClient\bin\$(Configuration)\netstandard2.1\LoadAmmoAnimClient.dll</ClientDllPath>
-      <FikaClientDllPath>$(ProjectDir)..\LoadAmmoAnimClientFika\bin\$(Configuration)\netstandard2.1\LoadAmmoAnimClientFika.dll</FikaClientDllPath>
       <DeployedBundlePath>D:\SPTDev\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal\stanags_container.bundle</DeployedBundlePath>
     </PropertyGroup>
 
@@ -130,11 +125,6 @@
     <!-- Client DLL — should always be there given the ProjectReference, but warn if not -->
     <Warning Text="Client DLL missing at $(ClientDllPath) — release zip will not include the client" Condition="!Exists('$(ClientDllPath)')" />
     <Copy SourceFiles="$(ClientDllPath)" DestinationFolder="$(ReleaseStagingDir)\BepInEx\plugins\LoadAmmoAnim" Condition="Exists('$(ClientDllPath)')" />
-
-    <!-- Fika compat DLL — sideloaded by the main client at Awake when Fika is detected.
-         shipping it unconditionally is fine since the loader gates on Chainloader.PluginInfos. -->
-    <Warning Text="Fika compat DLL missing at $(FikaClientDllPath) — release zip will not include Fika compat. Build LoadAmmoAnimClientFika to populate." Condition="!Exists('$(FikaClientDllPath)')" />
-    <Copy SourceFiles="$(FikaClientDllPath)" DestinationFolder="$(ReleaseStagingDir)\BepInEx\plugins\LoadAmmoAnim" Condition="Exists('$(FikaClientDllPath)')" />
 
     <!-- ServerModFiles (bundles.json, db/*.jsonc) -->
     <ItemGroup>

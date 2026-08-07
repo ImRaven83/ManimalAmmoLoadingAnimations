@@ -13,37 +13,8 @@ using UnityEngine;
 
 namespace Manimal.LoadAmmoAnim.Patches
 {
-    // event seam used by the Fika compat assembly. the main client raises these
-    // for local-player session lifecycle changes, the Fika layer subscribes and
-    // turns them into network packets. fire-and-forget — handlers must not throw.
-    internal static class LoadAmmoAnimEvents
-    {
-        public static event Action<Player, string, float> AnimStarted;
-        public static event Action<Player, bool> AnimStopped;
-        public static event Action<Player, string> MagSwapped;
-
-        internal static void RaiseStarted(Player p, string magTpl, float speed)
-        {
-            try { AnimStarted?.Invoke(p, magTpl, speed); }
-            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] AnimStarted handler threw: {ex.Message}"); }
-        }
-
-        internal static void RaiseStopped(Player p, bool playPutAway)
-        {
-            try { AnimStopped?.Invoke(p, playPutAway); }
-            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] AnimStopped handler threw: {ex.Message}"); }
-        }
-
-        internal static void RaiseMagSwapped(Player p, string magTpl)
-        {
-            try { MagSwapped?.Invoke(p, magTpl); }
-            catch (Exception ex) { Plugin.LogSource?.LogError($"[LoadAmmoAnim] MagSwapped handler threw: {ex.Message}"); }
-        }
-    }
-
     // per-player session bag. one of these per Player that has ever started a load.
-    // keeps everything that used to be on the static LoadAmmoAnimState class so
-    // multi-player setups (Fika) can run independent sessions side by side.
+    // keeps everything that used to be on the static LoadAmmoAnimState class.
     internal sealed class PlayerSession
     {
         // tracks how many Class1204 sessions are alive for this player. the visible
@@ -123,8 +94,6 @@ namespace Manimal.LoadAmmoAnim.Patches
             {
                 s.DrawPhasePending = true;
                 player.StartCoroutine(LoadAmmoAnimDriver.StartNextFrame(player));
-                // notify Fika compat layer so it can broadcast.
-                LoadAmmoAnimEvents.RaiseStarted(player, s.CurrentMagTemplateId, s.LoadOneAmmoSpeed);
             }
         }
 
@@ -438,83 +407,6 @@ namespace Manimal.LoadAmmoAnim.Patches
                 player.TrySetLastEquippedWeapon(true, null);
         }
 
-        // entry point for the Fika compat layer to start the anim on a remote
-        // (observed) player when a Start packet arrives. doesnt fire AnimStarted —
-        // only the local Class1204 path does, to avoid re-broadcast loops.
-        //
-        // sets LoadingCount = 1 manually so AnimLoop's IsLoading check passes
-        // until StopBundleAnim flips it back. observed players have no Class1204
-        // to drive the count naturally.
-        internal static void StartBundleAnim(Player player, string magTemplateId, float loadOneAmmoSpeed)
-        {
-            if (player == null) return;
-            var session = LoadAmmoAnimState.Get(player);
-            // already running for this player (eg. duplicate packet) — ignore.
-            if (session.IsOurAnimation) return;
-
-            session.LoadOneAmmoSpeed = loadOneAmmoSpeed > 0f ? loadOneAmmoSpeed : 1f;
-            session.CurrentMagTemplateId = magTemplateId;
-            session.CurrentMag = null;          // observed: we dont have the source's mag item
-            session.LoadingCount = 1;           // synthetic, kept up by Stop packet
-            session.DrawPhasePending = false;   // Class1204DrawDelayPatch is local-only
-
-            player.StartCoroutine(StartNextFrame(player));
-        }
-
-        // entry point for the Fika compat layer to end an observed player's anim
-        // when a Stop packet arrives. playPutAway=true gives the put-away clip,
-        // false destroys instantly. doesnt fire AnimStopped to avoid re-broadcast.
-        internal static void StopBundleAnim(Player player, bool playPutAway)
-        {
-            var session = LoadAmmoAnimState.TryGet(player);
-            if (session == null) return;
-
-            var controller = session.ActiveController;
-            session.LoadingCount = 0;
-            session.IsOurAnimation = false;
-
-            if (playPutAway && controller != null && player != null)
-                player.StartCoroutine(PlayPutawayThenRestore(player, controller));
-            else
-                StopAnimationInstantly(player);
-        }
-
-        // entry point for the Fika compat layer to swap the visible mag mesh on
-        // an observed player when a SwapMesh packet arrives. mirrors the inline
-        // chained-mag block inside AnimLoop. doesnt fire MagSwapped.
-        internal static void SwapMagMesh(Player player, string newMagTemplateId)
-        {
-            var session = LoadAmmoAnimState.TryGet(player);
-            if (session == null || !session.IsOurAnimation) return;
-            session.CurrentMagTemplateId = newMagTemplateId;
-            var controller = session.ActiveController;
-            if (controller != null && player != null)
-                player.StartCoroutine(SwapMagMeshCoroutine(player, controller));
-        }
-
-        private static IEnumerator SwapMagMeshCoroutine(Player player, LoadAmmoBundleController controller)
-        {
-            controller.PlayPutAway();
-
-            float deadline = Time.unscaledTime + PutAwayMaxWaitSeconds;
-            while (Time.unscaledTime < deadline)
-            {
-                if (controller == null) break;
-                if (controller.IsPutAwayNearlyDone()) break;
-                yield return null;
-            }
-
-            var session = LoadAmmoAnimState.TryGet(player);
-            if (session?.ActiveRenderer != null)
-            {
-                session.ActiveRenderer.enabled = false;
-                session.ActiveRenderer = null;
-            }
-            ApplyMeshSelection(player);
-
-            controller.PlayDraw();
-        }
-
         private static IEnumerator AnimLoop(Player player, LoadAmmoBundleController controller)
         {
             var session = LoadAmmoAnimState.Get(player);
@@ -540,7 +432,6 @@ namespace Manimal.LoadAmmoAnim.Patches
                         // always run put-away + destroy + re-equip, regardless of
                         // inventory state. instant-teardown leaves PWA stale.
                         session.IsOurAnimation = false;
-                        LoadAmmoAnimEvents.RaiseStopped(player, true);
                         if (player != null)
                             player.StartCoroutine(PlayPutawayThenRestore(player, controller));
                         break;
@@ -550,7 +441,6 @@ namespace Manimal.LoadAmmoAnim.Patches
                     if (Time.realtimeSinceStartup - idleSince >= ClaStopTimeoutSeconds)
                     {
                         session.IsOurAnimation = false;
-                        LoadAmmoAnimEvents.RaiseStopped(player, true);
                         if (player != null)
                             player.StartCoroutine(PlayPutawayThenRestore(player, controller));
                         break;
@@ -588,7 +478,6 @@ namespace Manimal.LoadAmmoAnim.Patches
                         }
                         ApplyMeshSelection(player);
                         sessionMag = session.CurrentMag;
-                        LoadAmmoAnimEvents.RaiseMagSwapped(player, session.CurrentMagTemplateId);
 
                         controller.PlayDraw();
                         continue;
@@ -597,7 +486,6 @@ namespace Manimal.LoadAmmoAnim.Patches
                     // terminal. put-away + destroy + re-equip.
                     session.IsOurAnimation = false;
                     LoadAmmoAnimState.ForceResetLoading(player);
-                    LoadAmmoAnimEvents.RaiseStopped(player, true);
                     if (player != null)
                         player.StartCoroutine(PlayPutawayThenRestore(player, controller));
 
