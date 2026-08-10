@@ -63,7 +63,7 @@
   <!-- Copy DLL and all static mod files to the SPT dev install -->
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <PropertyGroup>
-      <DeployDir>D:\SPTDev\SPT\user\mods\LoadAmmoAnimServer</DeployDir>
+      <DeployDir>D:\SPTDev\SPT_Runtime\user\mods\LoadAmmoAnimServer</DeployDir>
     </PropertyGroup>
     <MakeDir Directories="$(DeployDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DeployDir)" />
@@ -79,7 +79,7 @@
       <ModName>$(AssemblyName)</ModName>
       <ZipFileName>$(ModName).zip</ZipFileName>
       <TempPackageDir>$(ProjectDir)obj\Package</TempPackageDir>
-      <ModPackageDir>$(TempPackageDir)\SPT\user\mods\LoadAmmoAnimServer</ModPackageDir>
+      <ModPackageDir>$(TempPackageDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer</ModPackageDir>
     </PropertyGroup>
     <Message Text="--- Starting Mod packaging for distribution ---" Importance="high" />
     <RemoveDir Directories="$(TempPackageDir)" />
@@ -110,17 +110,17 @@
       <ReleaseStagingDir>$(ProjectDir)..\obj\ReleasePackage</ReleaseStagingDir>
       <ReleaseZipPath>$(ProjectDir)..\LoadAmmoAnim-$(Version).zip</ReleaseZipPath>
       <ClientDllPath>$(ProjectDir)..\LoadAmmoAnimClient\bin\$(Configuration)\netstandard2.1\LoadAmmoAnimClient.dll</ClientDllPath>
-      <DeployedBundlePath>D:\SPTDev\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal\stanags_container.bundle</DeployedBundlePath>
+      <DeployedBundlePath>D:\SPTDev\SPT_Runtime\user\mods\LoadAmmoAnimServer\bundles\manimal\stanags_container.bundle</DeployedBundlePath>
     </PropertyGroup>
 
     <Message Text="--- Building combined release zip at $(ReleaseZipPath) ---" Importance="high" />
 
     <RemoveDir Directories="$(ReleaseStagingDir)" />
     <MakeDir Directories="$(ReleaseStagingDir)\BepInEx\plugins\LoadAmmoAnim" />
-    <MakeDir Directories="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer" />
+    <MakeDir Directories="$(ReleaseStagingDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer" />
 
     <!-- Server DLL -->
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ReleaseStagingDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer" />
 
     <!-- Client DLL — should always be there given the ProjectReference, but warn if not -->
     <Warning Text="Client DLL missing at $(ClientDllPath) — release zip will not include the client" Condition="!Exists('$(ClientDllPath)')" />
@@ -130,12 +130,12 @@
     <ItemGroup>
       <ReleaseStaticFiles Include="$(ProjectDir)..\ServerModFiles\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(ReleaseStaticFiles)" DestinationFiles="@(ReleaseStaticFiles->'$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(ReleaseStaticFiles)" DestinationFiles="@(ReleaseStaticFiles->'$(ReleaseStagingDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer\%(RecursiveDir)%(Filename)%(Extension)')" />
 
     <!-- Asset bundle from deployed install (not in repo) -->
     <Warning Text="Bundle file missing at $(DeployedBundlePath) — release zip will not include the .bundle. Re-export from Unity or copy the bundle into your deployed install path before next packaging." Condition="!Exists('$(DeployedBundlePath)')" />
-    <MakeDir Directories="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
-    <Copy SourceFiles="$(DeployedBundlePath)" DestinationFolder="$(ReleaseStagingDir)\SPT\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
+    <MakeDir Directories="$(ReleaseStagingDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
+    <Copy SourceFiles="$(DeployedBundlePath)" DestinationFolder="$(ReleaseStagingDir)\SPT_Runtime\user\mods\LoadAmmoAnimServer\bundles\manimal" Condition="Exists('$(DeployedBundlePath)')" />
 
     <ZipDirectory SourceDirectory="$(ReleaseStagingDir)" DestinationFile="$(ReleaseZipPath)" Overwrite="true" />
     <RemoveDir Directories="$(ReleaseStagingDir)" />
