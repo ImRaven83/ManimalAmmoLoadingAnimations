@@ -7,16 +7,16 @@ using SPT.Reflection.Patching;
 
 namespace Manimal.LoadAmmoAnim.Patches
 {
-    // patches ClientUsableItemController.smethod_11, the static async factory the
+    // patches ClientUsableItemController.CreateAsync, the static async factory the
     // engine uses when building a controller from an item id during a hand swap.
-    // vanilla only handles PortableRangeFinderItemClass; for our type the cast
-    // returns null and the engine ends up with a controller that has no Item.
-    // we route to smethod_7 with our type as the generic arg.
+    // vanilla only handles PortableRangeFinder; for our type the FindItem<PortableRangeFinder>
+    // lookup returns null and the engine ends up with a controller that has no Item.
+    // we route to CreateControllerAsync with our type as the generic arg.
     internal sealed class ClientUsableBundleSmethod11Patch : ModulePatch
     {
         protected override MethodBase GetTargetMethod() =>
             typeof(ClientUsableItemController).GetMethod(
-                "smethod_11",
+                "CreateAsync",
                 BindingFlags.Public | BindingFlags.Static);
 
         [PatchPrefix]
@@ -30,7 +30,7 @@ namespace Manimal.LoadAmmoAnim.Patches
             var item = player.InventoryController.FindItem<LoadAmmoBundleItem>(itemId);
             if (item != null)
             {
-                __result = Player.UsableItemController.smethod_7<ClientUsableItemController>(player, item);
+                __result = Player.UsableItemController.CreateControllerAsync<ClientUsableItemController>(player, item);
                 return false;
             }
             return true;

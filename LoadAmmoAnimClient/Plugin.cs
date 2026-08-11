@@ -27,10 +27,11 @@ namespace Manimal.LoadAmmoAnim
 
             // dispatch patches. route LoadAmmoBundleItem through LoadAmmoBundleController
             // instead of the engine's default usable-item handlers. mirror of HackerMod's
-            // four-patch shim for custom items.
+            // three-patch shim for custom items. no animation-type patch needed: our item
+            // extends PortableRangeFinder, and Player.GetWeaponAnimationType already treats
+            // PortableRangeFinder as Pistol.
             new SetInHandsBundlePatch().Enable();
             new ClientUsableBundleSmethod11Patch().Enable();
-            new HandsControllerAnimationTypeBundlePatch().Enable();
             new UsableBundleInterfaceDispatchPatch().Enable();
 
             // defensive PWA guards — there's still a brief window during controller
